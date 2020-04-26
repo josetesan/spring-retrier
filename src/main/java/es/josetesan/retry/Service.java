@@ -5,9 +5,9 @@ import static java.lang.System.out;
 
 public class Service {
 
-    public void serviceMethod(final Integer value)  {
+    public int serviceMethod(final Integer value)  {
        out.format("Trying method with value %d%n",value);
-       out.format("Method is working %d%n",value/2);
+       return value/2;
     }
 
 }

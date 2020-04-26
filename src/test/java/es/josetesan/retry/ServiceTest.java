@@ -1,14 +1,15 @@
 package es.josetesan.retry;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.retry.RecoveryCallback;
 import org.springframework.retry.RetryCallback;
 import org.springframework.retry.RetryContext;
 import org.springframework.retry.RetryListener;
 import org.springframework.retry.backoff.ExponentialBackOffPolicy;
 import org.springframework.retry.policy.SimpleRetryPolicy;
 import org.springframework.retry.support.RetryTemplate;
+import org.springframework.util.StopWatch;
 
 import java.util.Collections;
 
@@ -24,31 +25,35 @@ public class ServiceTest {
 
         service = new Service();
 
-        retryTemplate = new RetryTemplate();
-
         ExponentialBackOffPolicy exponentialBackOffPolicy = new ExponentialBackOffPolicy();
-        exponentialBackOffPolicy.setInitialInterval(1000);
+        exponentialBackOffPolicy.setInitialInterval(1_000);
         exponentialBackOffPolicy.setMultiplier(1.2d);
-        exponentialBackOffPolicy.setMaxInterval(5000);
+        exponentialBackOffPolicy.setMaxInterval(5_000);
+
+        SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy(10, Collections.singletonMap(NullPointerException.class, true));
+
+        retryTemplate = new RetryTemplate();
         retryTemplate.setBackOffPolicy(exponentialBackOffPolicy);
-
-        SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy(5, Collections.singletonMap(NullPointerException.class, true));
-        retryPolicy.setMaxAttempts(5);
-
         retryTemplate.setRetryPolicy(retryPolicy);
+
+
         retryTemplate.registerListener(new RetryListener() {
+            final StopWatch stopWatch = new StopWatch();
             public <T, E extends Throwable> boolean open(RetryContext context, RetryCallback<T, E> callback) {
+                stopWatch.start("Opening");
                 out.println("Open");
                 return true;
             }
 
             public <T, E extends Throwable> void close(RetryContext context, RetryCallback<T, E> callback, Throwable throwable) {
-                out.println("Closing");
-                System.exit(-1);
+                stopWatch.stop();
+                out.format("Closing %s%n",stopWatch.prettyPrint());
             }
 
             public <T, E extends Throwable> void onError(RetryContext context, RetryCallback<T, E> callback, Throwable throwable) {
-                out.format("onError, waiting %d times%n",context.getRetryCount());
+                stopWatch.stop();
+                out.format("onError, waiting %d times, time %s %n",context.getRetryCount(),stopWatch.shortSummary());
+                stopWatch.start("onError:"+context.getRetryCount());
             }
         });
 
@@ -58,30 +63,28 @@ public class ServiceTest {
 
     @Test
     public void testRetry() {
-
-        Integer value = 1;
-        retryTemplate.execute(context -> {
-            service.serviceMethod(value);
-            return null;
-        });
+        Integer result = retryTemplate.execute(context -> service.serviceMethod(2));
+        out.format("Final result is %d%n",result);
+        Assertions.assertEquals(1, result);
     }
 
     @Test
     public void testRetryFails() {
-
-        Integer value = null;
-        retryTemplate.execute(context -> {
-            service.serviceMethod(value);
-            return null;
-        });
+        Assertions.assertThrows(NullPointerException.class,() -> retryTemplate.execute(context -> service.serviceMethod(null)));
     }
 
 
     @Test
     public void testRetryFailsAndRecover() {
-        Integer value = null;
-        retryTemplate.execute(context -> { service.serviceMethod(value);return null;},
-                              context -> { out.println("Recovered");service.serviceMethod(1);return null;});
+        Integer result = retryTemplate.execute(context ->  service.serviceMethod(null),
+                              context -> {
+                                           out.println("Recovered");
+                                           return service.serviceMethod(2);
+                                         }
+                            );
+
+        out.format("Final result is %d%n",result);
+        Assertions.assertEquals(1, result);
     }
 
 }
